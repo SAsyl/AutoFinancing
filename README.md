@@ -18,7 +18,7 @@ Allows users to input expenses through chat and generate insightful reports and 
 ## 🔧 Tech Stack
 
 - **Python**
-- **Telegram Bot API** via [`aiogram`](https://docs.aiogram.dev)
+- **Telegram Bot API** via [`telebot`](https://pytba.readthedocs.io/en/latest/)
 - **SQLite** for local data storage
-- **Pandas**, **Matplotlib**, **Seaborn** for data analysis and visualization
+- **Pandas**, **Matplotlib** for data analysis and visualization
 

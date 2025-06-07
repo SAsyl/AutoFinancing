@@ -12,6 +12,8 @@ import os
 load_dotenv()
 
 BOT_API_TOKEN = os.getenv("AutoFinancingBot_API_key")
+db_expenses = os.getenv("db_expenses")
+db_users = os.getenv("db_users")
 
 def manual_insert():
     user_id = input("User ID: ")
@@ -45,7 +47,7 @@ def start_bot():
         user_fullname = message.from_user.first_name + ' ' + message.from_user.last_name
         register_date = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
 
-        conn = sqlite3.connect("db/users.db")
+        conn = sqlite3.connect(db_users)
         cursor = conn.cursor()
 
         # Check if user exists
@@ -85,7 +87,7 @@ def start_bot():
         user_id = message.from_user.id
         chat_id = message.chat.id
 
-        conn = sqlite3.connect("db/expenses.db")
+        conn = sqlite3.connect(db_expenses)
         cursor = conn.cursor()
 
         df = pd.read_sql_query(
@@ -205,7 +207,7 @@ def start_bot():
             user_id = message.from_user.id
 
             # Save to DB
-            conn = sqlite3.connect("db/expenses.db")
+            conn = sqlite3.connect(db_expenses)
             cursor = conn.cursor()
             cursor.execute("""
                     INSERT INTO expenses (user_id, category, subcategory, amount, description, store, date)

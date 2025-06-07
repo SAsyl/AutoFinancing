@@ -5,9 +5,11 @@ import os
 
 load_dotenv()
 
+db_expenses = os.getenv("db_expenses")
+db_users = os.getenv("db_users")
 
 def init_db():
-    conn = sqlite3.connect("db/expenses.db")
+    conn = sqlite3.connect(db_expenses)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS expenses (
@@ -34,7 +36,7 @@ def add_expense(user_id, category, subcategory, amount, description, store, date
     else:
         user_id = os.getenv("ghost_user_id")
 
-    conn = sqlite3.connect("db/expenses.db")
+    conn = sqlite3.connect(db_expenses)
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO expenses (user_id, category, subcategory, amount, description, store, date)
@@ -44,7 +46,7 @@ def add_expense(user_id, category, subcategory, amount, description, store, date
     conn.close()
 
 def init_user_db():
-    conn = sqlite3.connect("db/users.db")
+    conn = sqlite3.connect(db_users)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (

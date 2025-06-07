@@ -1,5 +1,9 @@
+# Python files
+__pycache__/
+.idea/
+
 # Virtual environments
-AutoFinancing/*
+AutoFinancing/
 .env/
 env/
 
