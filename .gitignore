@@ -1,31 +1,16 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-
 # Virtual environments
 AutoFinancing/*
-.venv/
-venv/
-
-# Jupyter Notebook
-.ipynb_checkpoints/
-*.ipynb
+.env/
+env/
 
 # SQLite database
-*.db
+db/*.db
 
 # Logs and dumps
 *.log
 *.out
 *.bak
-
-# OS generated
-.DS_Store
-Thumbs.db
-
+.fuse_hidden*
 
 # Environment files
 .env
-config.py
