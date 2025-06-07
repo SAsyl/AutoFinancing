@@ -1,8 +1,9 @@
-# 💰 Telegram Expense Tracker Bot
+# 💰 Telegram Expense Tracker Bot — @AutoFinancingBot
 
 A personal finance tracking bot built with Python and Telegram API.  
 Allows users to input expenses through chat and generate insightful reports and dashboards.
 
+📲 **Try it now on Telegram:** [@AutoFinancingBot](https://t.me/AutoFinancingBot)
 ---
 
 ## ✨ Features

@@ -4,11 +4,10 @@ __pycache__/
 
 # Virtual environments
 AutoFinancing/
-.env/
-env/
+.env
 
 # SQLite database
-db/*.db
+db/
 
 # Logs and dumps
 *.log
@@ -16,5 +15,3 @@ db/*.db
 *.bak
 .fuse_hidden*
 
-# Environment files
-.env
