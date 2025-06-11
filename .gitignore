@@ -1,6 +1,8 @@
 # Python files
 __pycache__/
 .idea/
+__pycache__/
+.git/
 
 # Virtual environments
 AutoFinancing/
@@ -8,8 +10,10 @@ AutoFinancing/
 
 # SQLite database
 db/
+*.db
 
 # Logs and dumps
+logs/
 *.log
 *.out
 *.bak
