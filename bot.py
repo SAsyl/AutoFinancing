@@ -84,7 +84,6 @@ def start_bot():
         bot.send_message(message.chat.id, f"👋 Приветствую {user_name} {user_surname}! Я бот для учёта расходов.")
 
         register_user_if_needed(message)
-        bot.send_message(message.chat.id, f"Для того, чтобы узнать о командах бота, напишите /help")
 
         logging.info(f"/start от {user_name} {user_surname}")
         # print("Handed: /start")
@@ -205,23 +204,65 @@ def start_bot():
             logging.warning(f"Unexpected /graph option: {message.text}")
             # print("Handed: /graph")
 
-    @bot.message_handler(commands=['help'])
-    def send_help(message):
-        bot.send_message(message.chat.id, "Команды: /start /expense /income /graph /current_weather /forecast_weather")
-        logging.info(f"/help от {message.from_user.first_name} {message.from_user.last_name}")
-        # print("Handed: /help")
-
     @bot.message_handler(commands=['expense'])
     def handle_expense_command(message):
         logging.info(f"/expense от {message.from_user.first_name} {message.from_user.last_name}")
 
         user_state_expense[message.chat.id] = {'step': 'category'}
 
-        markup_category = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        for category in expense_categories.keys():
-            markup_category.add(category)
+        markup_category = types.InlineKeyboardMarkup(row_width=3)
 
-        bot.send_message(message.chat.id, "Выберите категорию расхода или введите все данные следующим образом\nКатегория | Подкатегория | Сумма | Краткое описание | Магазин | Дата в формате DD.MM.YYYY (если сегодня, то можно пропустить):", reply_markup=markup_category)
+        category_buttons = []
+        for category in expense_categories.keys():
+            button = types.InlineKeyboardButton(text=category, callback_data=f"expense_cat:{category}")
+            category_buttons.append(button)
+
+        markup_category.add(*category_buttons)
+
+        bot.send_message(message.chat.id,
+                         "Выберите категорию расхода или введите все данные следующим образом:\n`Категория* | Подкатегория* | Сумма* | Описание | Магазин | Дата (DD.MM.YYYY)`",
+                         reply_markup=markup_category,
+                         parse_mode="Markdown"
+        )
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("expense_cat:"))
+    def handle_expense_category_callback(call):
+        chat_id = call.message.chat.id
+        selected_category = call.data.split(":")[1]
+        state = user_state_expense[chat_id]
+        state['category'] = selected_category
+
+        bot.answer_callback_query(call.id)
+
+        markup_subcategory = types.InlineKeyboardMarkup(row_width=3)
+        buttons = []
+        for subcategory in expense_categories[selected_category]:
+            button = types.InlineKeyboardButton(text=subcategory, callback_data=f"expense_subcat:{subcategory}")
+            buttons.append(button)
+        markup_subcategory.add(*buttons)
+
+        bot.edit_message_text(chat_id=call.message.chat.id,
+                              message_id=call.message.message_id,
+                              text=f"Категория выбрана: {selected_category}\nТеперь выберите подкатегорию:",
+                              reply_markup=markup_subcategory)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("expense_subcat:"))
+    def handle_expense_subcategory_callback(call):
+        chat_id = call.message.chat.id
+        selected_subcategory = call.data.split(":")[1]
+        state = user_state_expense[chat_id]
+
+        if chat_id in user_state_expense:
+            state['subcategory'] = selected_subcategory
+            state['step'] = 'amount_description_shop_date'
+
+            bot.answer_callback_query(call.id)
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                text=f"Категория выбрана: {state['category']}\nПодкатегория выбрана: {selected_subcategory}\nТеперь введите:\n`Сумма* | Описание | Магазин | Дата (DD.MM.YYYY)`",
+                parse_mode="Markdown"
+            )
 
     @bot.message_handler(func=lambda message: message.chat.id in user_state_expense)
     def handle_expense_steps(message):
@@ -233,24 +274,29 @@ def start_bot():
             selected_category = message.text.strip()
             if selected_category not in expense_categories.keys():
                 user_state_expense.pop(chat_id)
-                logging.info(f"Handed one line category by {message.from_user.first_name} {message.from_user.last_name}")
+
+                logging.info(f"Handed oneline expense by {message.from_user.first_name} {message.from_user.last_name}")
                 process_expense_input_oneline(message)
             else:
                 state['category'] = selected_category
                 state['step'] = 'subcategory'
 
-                markup_subcategory = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+                markup_subcategory = types.InlineKeyboardMarkup(row_width=3)
+                buttons = []
                 for subcategory in expense_categories[selected_category]:
-                    markup_subcategory.add(subcategory)
+                    btn = types.InlineKeyboardButton(text=subcategory, callback_data=f"expense_subcat:{subcategory}")
+                    buttons.append(btn)
+                markup_subcategory.add(*buttons)
 
-                bot.send_message(chat_id, "Выберите подкатегорию дохода:", reply_markup=markup_subcategory)
+                bot.send_message(chat_id, "Выберите подкатегорию расхода:", reply_markup=markup_subcategory)
         elif step == 'subcategory':
             selected_subcategory = message.text.strip()
             state['subcategory'] = selected_subcategory
             state['step'] = 'amount_description_shop_date'
 
             bot.send_message(chat_id,
-                             f"Введите Сумма | Краткое описание | Магазин | Дата в формате DD.MM.YYYY (если сегодня, то можно пропустить)")
+                             f"Введите `Сумма* | Описание | Магазин | Дата в формате DD.MM.YYYY`",
+                            parse_mode="Markdown")
         elif step == 'amount_description_shop_date':
             try:
                 amount, description, store, date = message.text.split('|')
@@ -277,26 +323,21 @@ def start_bot():
                 conn.close()
 
                 user_state_expense.pop(chat_id)
+                bot.delete_message(chat_id, message.message_id-1)
+                bot.delete_message(chat_id, message.message_id)
 
-                # Send success message
                 bot.send_message(message.chat.id,
                                  f"✅ Расход сохранён: {category} ({subcategory}) in {store} — {amount} тг")
                 logging.info(
                     f"Расход сохранён: {category} ({subcategory}) in {store} — {amount} тг от {message.from_user.first_name} {message.from_user.last_name}")
             except Exception as e:
-                logging.warning(
-                    f"⚠️ Задан неверный формат \expense от {message.from_user.first_name} {message.from_user.last_name}")
+                logging.warning(f"⚠️ Задан неверный формат \expense от {message.from_user.first_name} {message.from_user.last_name}")
                 bot.send_message(chat_id,
-                                 "️ Неверный формат. Пожалуйста, введите как: Категория | Подкатегория | Сумма | Краткое описание | Магазин | Дата\nПример: Auto | Taxi | 1300 | Work -> Home | YangexGo | ")
+                                 "️ Неверный формат. Пожалуйста, введите как: `Категория* | Подкатегория* | Сумма* | Краткое описание | Магазин | Дата`\nПример: Auto | Taxi | 1300 | Work -> Home | YangexGo | ",
+                                 parse_mode="Markdown")
 
     def process_expense_input_oneline(message):
         try:
-            if message.text.strip() == '/finish':
-                bot.send_message(message.chat.id, "Расходы сохранены!")
-                logging.info(f"/finish (expense) от {message.from_user.first_name} {message.from_user.last_name}")
-                # print("Handed: /finish")
-                return
-
             parts = message.text.strip().lower().split('|')
             if len(parts) == 6:
                 category, subcategory, amount, description, store, date = parts
@@ -324,17 +365,19 @@ def start_bot():
             conn.commit()
             conn.close()
 
-            # Send success message
+            bot.delete_message(message.chat.id, message.message_id-1)
+            bot.delete_message(message.chat.id, message.message_id)
+
             bot.send_message(message.chat.id, f"✅ Расход сохранён: {category} ({subcategory}) in {store} — {amount} тг")
             logging.info(f"Расход сохранён: {category} ({subcategory}) in {store} — {amount} тг от {message.from_user.first_name} {message.from_user.last_name}")
-            # print(f"✅ Расход сохранён: {category} ({subcategory}) in {store} — {amount} тг")
 
-            bot.send_message(message.chat.id, "Продолжить вводить расходы? Если нет, то напишите /finish")
-            bot.register_next_step_handler(message, process_expense_input_oneline)
+            # bot.send_message(message.chat.id, "Продолжить вводить расходы? Если нет, то напишите /finish")
+            # bot.register_next_step_handler(message, process_expense_input_oneline)
         except Exception as e:
             logging.warning(f"⚠️ Задан неверный формат \expense от {message.from_user.first_name} {message.from_user.last_name}")
             bot.send_message(message.chat.id,
-                             "⚠️ Неверный формат. Пожалуйста, введите как: Категория | Подкатегория | Сумма | Краткое описание | Магазин | Дата\nПример: transport | taxi | 1300 | Work -> Home | YangexGo | ")
+                             "⚠️ Неверный формат. Пожалуйста, введите как: `Категория* | Подкатегория* | Сумма* | Описание | Магазин | Дата`\nПример: transport | taxi | 1300 | Work -> Home | YangexGo | ",
+                             parse_mode="Markdown")
 
     @bot.message_handler(commands=['income'])
     def handle_income_command(message):
@@ -342,15 +385,60 @@ def start_bot():
 
         user_state_income[message.chat.id] = {'step': 'category'}
 
-        # bot.send_message(message.chat.id,
-        #                                 "Введите доход в формате:\nКатегория | Подкатегория | Сумма | Краткое описание | Дата (если сегодня, то можно пропустить, иначе в формате DD.MM.YYYY (HH:MM:SS))")
-        # income_msg = bot.send_message(message.chat.id, "Выберите категорию из следующего списка:")
+        markup_category = types.InlineKeyboardMarkup(row_width=3)
 
-        markup_category = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        category_buttons = []
         for category in income_categories.keys():
-            markup_category.add(category)
+            button = types.InlineKeyboardButton(text=category, callback_data=f"income_cat:{category}")
+            category_buttons.append(button)
 
-        bot.send_message(message.chat.id, "Выберите категорию дохода или введите все данные следующим образом\nКатегория | Подкатегория | Сумма | Краткое описание | Дата в формате DD.MM.YYYY (если сегодня, то можно пропустить):", reply_markup=markup_category)
+        markup_category.add(*category_buttons)
+
+        bot.send_message(message.chat.id,
+                         "Выберите категорию дохода или введите все данные следующим образом:\n`Категория* | Подкатегория* | Сумма* | Краткое описание | Дата (DD.MM.YYYY)`",
+                         reply_markup=markup_category,
+                         parse_mode="Markdown"
+        )
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("income_cat:"))
+    def handle_income_category_callback(call):
+        chat_id = call.message.chat.id
+        selected_category = call.data.split(":")[1]
+        state = user_state_income[chat_id]
+        state['category'] = selected_category
+        state['step'] = 'subcategory'
+
+        bot.answer_callback_query(call.id)
+
+        markup_subcategory = types.InlineKeyboardMarkup(row_width=3)
+        buttons = []
+        for subcategory in income_categories[selected_category]:
+            button = types.InlineKeyboardButton(text=subcategory, callback_data=f"income_subcat:{subcategory}")
+            buttons.append(button)
+        markup_subcategory.add(*buttons)
+
+        bot.edit_message_text(chat_id=call.message.chat.id,
+                              message_id=call.message.message_id,
+                              text=f"Категория выбрана: {selected_category}\nТеперь выберите подкатегорию:",
+                              reply_markup=markup_subcategory)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("income_subcat:"))
+    def handle_income_subcategory_callback(call):
+        chat_id = call.message.chat.id
+        selected_subcategory = call.data.split(":")[1]
+        state = user_state_income[chat_id]
+
+        if chat_id in user_state_income:
+            state['subcategory'] = selected_subcategory
+            state['step'] = 'amount_description_date'
+
+            bot.answer_callback_query(call.id)
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                text=f"Категория выбрана: {state['category']}\nПодкатегория выбрана: {selected_subcategory}\nТеперь введите:\n`Сумма* | Описание | Дата (можно пропустить)`",
+                parse_mode="Markdown"
+            )
 
     @bot.message_handler(func=lambda message: message.chat.id in user_state_income)
     def handle_income_steps(message):
@@ -362,16 +450,21 @@ def start_bot():
             selected_category = message.text.strip()
             if selected_category not in income_categories.keys():
                 user_state_income.pop(chat_id)
+
                 logging.info(
-                    f"Handed one line category by {message.from_user.first_name} {message.from_user.last_name}")
+                    f"Handed oneline income by {message.from_user.first_name} {message.from_user.last_name}")
                 process_income_input_oneline(message)
             else:
                 state['category'] = selected_category
                 state['step'] = 'subcategory'
 
-                markup_subcategory = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+
+                markup_subcategory = types.InlineKeyboardMarkup(row_width=3)
+                buttons = []
                 for subcategory in income_categories[selected_category]:
-                    markup_subcategory.add(subcategory)
+                    btn = types.InlineKeyboardButton(text=subcategory, callback_data=f"income_subcat:{subcategory}")
+                    buttons.append(btn)
+                markup_subcategory.add(*buttons)
 
                 bot.send_message(chat_id, "Выберите подкатегорию дохода:", reply_markup=markup_subcategory)
         elif step == 'subcategory':
@@ -379,7 +472,9 @@ def start_bot():
             state['subcategory'] = selected_subcategory
             state['step'] = 'amount_description_date'
 
-            bot.send_message(chat_id, f"Введите Сумма | Краткое описание | Дата в формате DD.MM.YYYY (если сегодня, то можно пропустить)")
+            bot.send_message(chat_id,
+                             f"Введите `Сумма* | Описание | Дата (DD.MM.YYYY))",
+                             parse_mode="Markdown")
         elif step == 'amount_description_date':
             try:
                 amount, description, date = message.text.split('|')
@@ -405,6 +500,8 @@ def start_bot():
                 conn.close()
 
                 user_state_income.pop(chat_id)
+                bot.delete_message(chat_id, message.message_id-1)
+                bot.delete_message(chat_id, message.message_id)
 
                 # Send success message
                 bot.send_message(chat_id,
@@ -415,29 +512,25 @@ def start_bot():
             except Exception as e:
                 logging.warning(f"⚠️ Задан неверный формат \income от {message.from_user.first_name} {message.from_user.last_name}")
                 bot.send_message(chat_id,
-                                 "⚠️ Неверный формат. Пожалуйста, введите как: Категория | Подкатегория | Сумма | Краткое описание | Дата\nПример: 20000 | Днюха | 28.02.2003 ")
+                                 "⚠️ Неверный формат. Пожалуйста, введите как: `Сумма* | Описание | Дата`\nПример: 20000 | Днюха | 28.02.2025",
+                                 parse_mode="Markdown")
 
     def process_income_input_oneline(message):
         try:
-            if message.text.strip() == '/finish':
-                bot.send_message(message.chat.id, "Доходы сохранены!")
-                logging.info(f"/finish (income) от {message.from_user.first_name} {message.from_user.last_name}")
-                return
+            parts = message.text.strip().split('|')
 
-            parts = message.text.strip().lower().split('|')
             if len(parts) == 5:
                 category, subcategory, amount, description, date = parts
 
-            if date is None or date == '':
+            if date is None or date.strip() == '':
                 date = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
 
             category = category.strip()
             subcategory = subcategory.strip()
-            amount = amount.strip()
+            amount = float(amount.strip())
             description = description.strip()
             date = date.strip()
 
-            amount = float(amount)
             user_id = message.from_user.id
 
             # Save to DB
@@ -445,24 +538,26 @@ def start_bot():
             cursor = conn.cursor()
             cursor.execute("""
                     INSERT INTO incomes (user_id, category, subcategory, amount, description, date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?)
                 """, (user_id, category, subcategory, amount, description, date))
             conn.commit()
             conn.close()
 
-            # Send success message
-            bot.send_message(message.chat.id, f"✅ Расход сохранён: {category} ({subcategory}) — {amount} тг")
+            bot.delete_message(message.chat.id, message.message_id - 1)
+            bot.delete_message(message.chat.id, message.message_id)
+
+            bot.send_message(message.chat.id, f"✅ Доход сохранён: {category} ({subcategory}) — {amount} тг")
             logging.info(
                 f"Доход сохранён: {category} ({subcategory}) — {amount} тг от {message.from_user.first_name} {message.from_user.last_name}")
             # print(f"✅ Расход сохранён: {category} ({subcategory}) in {store} — {amount} тг")
 
-            bot.send_message(message.chat.id, "Продолжить вводить доходы? Если нет, то напишите /finish")
-            bot.register_next_step_handler(message, process_income_input_oneline)
+            # bot.send_message(message.chat.id, "Продолжить вводить доходы? Если нет, то напишите /finish")
+            # bot.register_next_step_handler(message, process_income_input_oneline)
         except Exception as e:
-            logging.warning(
-                f"⚠️ Задан неверный формат \income от {message.from_user.first_name} {message.from_user.last_name}")
+            logging.warning(f"⚠️ Задан неверный формат \income от {message.from_user.first_name} {message.from_user.last_name}")
             bot.send_message(message.chat.id,
-                             "⚠️ Неверный формат. Пожалуйста, введите как: Категория | Подкатегория | Сумма | Краткое описание | Дата\nПример: Bills & Charges | Bonus Back | 5000 | Home Credit Bank | 01.07.2025 ")
+                             f"⚠️ Неверный формат. Пожалуйста, введите как: `Категория* | Подкатегория* | Сумма* | Краткое описание | Дата`\nПример: Bills & Charges | Bonus Back | 5000 | Home Credit Bank | 01.07.2025",
+                             parse_mode="Markdown")
 
     @bot.message_handler(commands=['current_weather'])
     def send_current_weather(message):
