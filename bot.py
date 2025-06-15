@@ -18,9 +18,9 @@ BOT_API_TOKEN = os.getenv("AutoFinancingBot_API_key")
 
 WEATHER_API_TOKEN = os.getenv("Weather_API_key")
 
-db_expenses = os.getenv("db_expenses")
-db_incomes = os.getenv("db_incomes")
-db_users = os.getenv("db_users")
+db_data = os.getenv("db_data")
+
+admin_user_id = os.getenv("admin_user_id")
 
 income_categories = {
     "Bills & Charges": ["Bonus Back", "Deposit", "Refund"],
@@ -61,18 +61,6 @@ logging.basicConfig(
     ]
 )
 
-def manual_insert():
-    user_id = input("User ID: ")
-    category = input("Category: ")
-    subcategory = input("Subcategory: ")
-    amount = input("Amount: ")
-    description = input("Description: ")
-    store = input("Store: ")
-    date = input("Date: ")
-
-    add_expense(user_id, category, subcategory, amount, description, store, date=None)
-    print("Complete!")
-
 def start_bot():
     bot = telebot.TeleBot(BOT_API_TOKEN)
 
@@ -80,29 +68,65 @@ def start_bot():
     def send_welcome(message):
         user_name = message.from_user.first_name
         user_surname = message.from_user.last_name
-        user_id = message.from_user.id
-        bot.send_message(message.chat.id, f"👋 Приветствую {user_name} {user_surname}! Я бот для учёта расходов.")
+        user_id = str(message.from_user.id).strip()
+        if user_id != admin_user_id:
+            bot.send_message(message.chat.id, f"👋 Приветствую {user_name} {user_surname}! Я бот для учёта расходов.")
+        else:
+            bot.send_message(message.chat.id, f"👋 Приветствую создатель!")
+            bot.send_message(message.chat.id, f"Введите /daily_deposit для учета ежедневных накоплений.")
 
         register_user_if_needed(message)
 
         logging.info(f"/start от {user_name} {user_surname}")
         # print("Handed: /start")
 
+    @bot.message_handler(commands=['daily_deposit'])
+    def send_daily_deposit_by_admin(message):
+        user_id = str(message.from_user.id).strip()
+
+        if user_id == admin_user_id:
+            logging.info(f"/daily_deposit by Admin")
+
+            date_deposit = bot.send_message(message.from_user.id, "Введите дату (DD.MM.YYYY):")
+            bot.register_next_step_handler(date_deposit, date_daily_deposit_by_admin)
+        else:
+            bot.send_message(message.chat.id, "У вас нет прав для этой команды.")
+            logging.warning(f"/daily_deposit by {message.from_user.id} - not Admin. Permission denied.")
+
+    def date_daily_deposit_by_admin(message):
+        date = message.text.strip()
+        if date is None or date.strip() == '':
+            date = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+
+        conn = sqlite3.connect(db_data)
+        cursor = conn.cursor()
+        cursor.execute("""
+                        INSERT INTO INCOMES (user_id, category, subcategory, amount, description, date)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """, (admin_user_id, "Bills & Charges", "Deposit", 1722.60, "Ежедневный депозит", date)
+                       )
+        conn.commit()
+        conn.close()
+
+        bot.delete_message(message.chat.id, message.message_id-1)
+        bot.delete_message(message.chat.id, message.message_id)
+        bot.send_message(message.chat.id, "✅ Ежедневный депозит успешно добавлен!")
+
     def register_user_if_needed(message):
         user_id = int(message.from_user.id)
         user_fullname = message.from_user.first_name + ' ' + message.from_user.last_name
         register_date = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
 
-        conn = sqlite3.connect(db_users)
+        conn = sqlite3.connect(db_data)
         cursor = conn.cursor()
 
         # Check if user exists
-        cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT * FROM USERS WHERE user_id = ?", (user_id,))
         user_exist = cursor.fetchone()
 
         if user_exist is None:
             cursor.execute("""
-                                INSERT INTO users (user_id, user_fullname, register_date)
+                                INSERT INTO USERS (user_id, user_fullname, register_date)
                                 VALUES (?, ?, ?)
                             """, (user_id, user_fullname, register_date))
             conn.commit()
@@ -122,33 +146,37 @@ def start_bot():
     def send_graph(message):
         # option_msg = bot.send_message(message.chat.id, "Выберите опцию из следующего списка:")
 
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        buttons = []
         graph_options = ['Статистика по категориям', 'Динамика за текущий месяц']
         for opt in graph_options:
-            markup.add(opt)
+            btn = types.InlineKeyboardButton(text=opt, callback_data=f"graph:{opt}")
+            buttons.append(btn)
+        markup.add(*buttons)
 
         option_msg = bot.send_message(message.chat.id, "Выберите опцию из списка:", reply_markup=markup)
-        bot.register_next_step_handler(option_msg, process_graph)
 
         logging.info(f"/graph от {message.from_user.first_name} {message.from_user.last_name}")
         # print("Handed: /graph")
 
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("graph:"))
     def process_graph(message):
+        graph_type = message.data.split(":")[1].strip()
+
         user_id = message.from_user.id
         chat_id = message.chat.id
 
-        conn = sqlite3.connect(db_expenses)
-        cursor = conn.cursor()
-
+        conn = sqlite3.connect(db_data)
+        # cursor = conn.cursor()
         df = pd.read_sql_query(
-            f"SELECT category, subcategory, amount, description, store, date FROM expenses WHERE user_id = {user_id}",
+            f"SELECT category, subcategory, amount, description, store, date FROM EXPENSES WHERE user_id = {user_id}",
             conn)
 
         for label in ['category', 'subcategory', 'description', 'store', 'date']:
             df[label] = df[label].apply(lambda x: x.strip())
         # print(df)
 
-        if message.text == 'Статистика по категориям':
+        if graph_type == 'Статистика по категориям':
             grouped_by_category = df.groupby('category')['amount'].sum().reset_index()
             # print(grouped_by_category)
 
@@ -171,7 +199,7 @@ def start_bot():
             plt.close()
 
             bot.send_photo(chat_id, photo=buffer)
-        elif message.text == 'Динамика за текущий месяц':
+        elif graph_type == 'Динамика за текущий месяц':
             today = datetime.date.today()
             # print(today)
             df['date'] = df['date'].apply(lambda x: datetime.datetime.strptime(x.split(' ')[0], "%d.%m.%Y").date())
@@ -313,10 +341,10 @@ def start_bot():
                 subcategory = state['subcategory']
 
                 # Save to DB
-                conn = sqlite3.connect(db_expenses)
+                conn = sqlite3.connect(db_data)
                 cursor = conn.cursor()
                 cursor.execute("""
-                                    INSERT INTO expenses (user_id, category, subcategory, amount, description, store, date)
+                                    INSERT INTO EXPENSES (user_id, category, subcategory, amount, description, store, date)
                                     VALUES (?, ?, ?, ?, ?, ?, ?)
                                 """, (user_id, category, subcategory, amount, description, store, date))
                 conn.commit()
@@ -356,10 +384,10 @@ def start_bot():
             user_id = message.from_user.id
 
             # Save to DB
-            conn = sqlite3.connect(db_expenses)
+            conn = sqlite3.connect(db_data)
             cursor = conn.cursor()
             cursor.execute("""
-                    INSERT INTO expenses (user_id, category, subcategory, amount, description, store, date)
+                    INSERT INTO EXPENSES (user_id, category, subcategory, amount, description, store, date)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (user_id, category, subcategory, amount, description, store, date))
             conn.commit()
@@ -490,10 +518,10 @@ def start_bot():
                 subcategory = state['subcategory']
 
                 # Save to DB
-                conn = sqlite3.connect(db_incomes)
+                conn = sqlite3.connect(db_data)
                 cursor = conn.cursor()
                 cursor.execute("""
-                                INSERT INTO incomes (user_id, category, subcategory, amount, description, date)
+                                INSERT INTO INCOMES (user_id, category, subcategory, amount, description, date)
                                 VALUES (?, ?, ?, ?, ?, ?)
                             """, (user_id, category, subcategory, amount, description, date))
                 conn.commit()
@@ -534,10 +562,10 @@ def start_bot():
             user_id = message.from_user.id
 
             # Save to DB
-            conn = sqlite3.connect(db_incomes)
+            conn = sqlite3.connect(db_data)
             cursor = conn.cursor()
             cursor.execute("""
-                    INSERT INTO incomes (user_id, category, subcategory, amount, description, date)
+                    INSERT INTO INCOMES (user_id, category, subcategory, amount, description, date)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, (user_id, category, subcategory, amount, description, date))
             conn.commit()
